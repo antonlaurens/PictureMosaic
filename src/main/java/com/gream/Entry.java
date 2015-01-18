@@ -5,6 +5,7 @@ import static org.kohsuke.args4j.ExampleMode.REQUIRED;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.geom.Ellipse2D;
@@ -21,8 +22,6 @@ import javax.imageio.ImageIO;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
-import org.kohsuke.args4j.OptionHandlerFilter;
-import org.kohsuke.args4j.spi.OptionHandler;
 
 import com.gream.mosaic.TreeBuilder;
 import com.gream.mosaic.datastructures.MosaicBinaryTree;
@@ -35,43 +34,53 @@ public class Entry {
 
 	private static final String IMAGE_CACHE_CSV = "imageCache.csv";
 
-	@Option(name = "-d", required = true, usage = "the directory in which the images are located")
+	@Option(name = "-dir", aliases = "-d", required = true, usage = "The directory in which the source images are located")
 	private String directory;
 
-	@Option(name = "-i", required = true, usage = "Input filename")
+	@Option(name = "-input", aliases = "-i", required = true, usage = "Input filename")
 	private String in;
 
-	@Option(name = "-o", required = true, usage = "Output filename")
+	@Option(name = "-output", aliases = "-o", required = true, usage = "Output filename")
 	private String out;
-	
-	@Option(name = "-n", usage = "Adds a chance of noise to the mosaic: [0, 1.0]")
+
+	@Option(name = "-noise", aliases = "-n", usage = "Adds a chance of noise to the mosaic: [0, 1.0]")
 	private double noise = 0;
-	
-	@Option(name = "-b", required = true, usage = "Amount of mosaic tiles per column and row.")
+
+	@Option(name = "-blocks", aliases = "-b", required = true, usage = "Amount of mosaic tiles per column and row.")
 	private int blocks = 50;
-	
-	@Option(name = "-t", usage = "Indicated the alpha of the color to tint the blocks with: [0, 255]")
-	private int tint = 0;
-	
-	@Option(name = "-c", usage = "Force a rebuild of the image cache")
+
+	@Option(name = "-tint", aliases = "-t", usage = "Indicated the alpha of the color to tint the blocks with: [0, 255]")
+	private int tint_amount = 0;
+
+	@Option(name = "-cache_rebuild", aliases = "-cr", usage = "Force a rebuild of the image cache")
 	private boolean clean;
-	
-	@Option(name = "-s", usage = "If set, then an image can only be used once as a tile in the mosaic. Risk of running out of photos.")
+
+	@Option(name = "-padding", aliases = "-p", usage = "Padding between the tiles in pixels")
+	private int padding = 0;
+
+	@Option(name = "-stroke", aliases = "-s", usage = "Tile stroke width in pixels")
+	private int border = 0;
+
+	@Option(name = "-circle", aliases = "-cir", usage = "If this is set, then tiles will be drawn as circles, not rectangles.")
+	private boolean circle = false;
+
+	@Option(name = "-consume", aliases = "-c", usage = "If set, then an image can only be used once as a tile in the mosaic. Risk of running out of photos.")
 	private boolean consume;
-	
-	@Option(name = "-a", usage = "If set, no two adjacent images can be the same")
-	private boolean adjacenyBan;
-	
-	@Option(name = "-v", usage = "Enables verbose output")
+
+	@Option(name = "-adjacency_ban", aliases = "-ab", usage = "If set, no two adjacent images can be the same")
+	private boolean adjacencyBan;
+
+	@Option(name = "-verbose", aliases = "-v", usage = "Enables verbose output")
 	private boolean verbose;
 
+	@SuppressWarnings("deprecation")
 	public void doMain(String[] args) {
 		CmdLineParser parser = new CmdLineParser(this);
-
+		
 		try {
 			parser.parseArgument(args);
 			noise = Math.min(1, noise);
-			tint = Math.min(255, tint);
+			tint_amount = Math.min(255, tint_amount);
 			
 			if (args.length == 0) {
 				throw new CmdLineException(parser, "No arguments found.");
@@ -98,28 +107,28 @@ public class Entry {
 			File f = new File(in);
 			BufferedImage img = ImageIO.read(f);
 
-			int xChunk = img.getWidth() / blocks;
-			int yChunk = img.getHeight() / blocks;
+			int tileWidth = img.getWidth() / blocks;
+			int tileHeight = img.getHeight() / blocks;
 			MosaicTile[][] newImg = new MosaicTile[blocks][blocks];
 
 			if (verbose) {
 				System.out.println("\nFinding best matches..");
 			}
 			
-			int counter = 0;
-			for (int i = 0; i < xChunk * blocks; i += xChunk) {
+			int progressBarCounter = 0;
+			for (int i = 0; i < tileWidth * blocks; i += tileWidth) {
 
-				for (int j = 0; j < yChunk * blocks; j += yChunk) {
-					if (adjacenyBan) {
+				for (int j = 0; j < tileHeight * blocks; j += tileHeight) {
+					if (adjacencyBan) {
 						tree.unstale();
 					}
-					int[] rgbs = new int[xChunk * yChunk];
-					img.getRGB(i, j, xChunk, yChunk, rgbs, 0, xChunk);
+					int[] rgbs = new int[tileWidth * tileHeight];
+					img.getRGB(i, j, tileWidth, tileHeight, rgbs, 0, tileWidth);
 					
 					MosaicNode consumeClosest = tree.findClosest(new MosaicTile("", "", ImageUtils.getAverageRGB(rgbs)));
 					
-					if (adjacenyBan) {
-						List<String> hitlist = getHitList(newImg, i / xChunk, j / yChunk);
+					if (adjacencyBan) {
+						List<String> hitlist = getHitList(newImg, i / tileWidth, j / tileHeight);
 						while (hitlist.contains(consumeClosest.getContents().getId())) {
 							consumeClosest.setStale(true);
 							consumeClosest = tree.findClosest(new MosaicTile("", "", ImageUtils.getAverageRGB(rgbs)));
@@ -127,11 +136,11 @@ public class Entry {
 					}
 					
 					consumeClosest.setStale(consume);
-					newImg[i / xChunk][j / yChunk] = consumeClosest.getContents();
+					newImg[i / tileWidth][j / tileHeight] = consumeClosest.getContents();
 					
-					counter++;
+					progressBarCounter++;
 					if (verbose) {
-						printProgBar((counter * 100) / (blocks * blocks));	
+						printProgBar((progressBarCounter * 100) / (blocks * blocks));	
 					}
 				}
 			}
@@ -140,8 +149,8 @@ public class Entry {
 				System.out.println("\nBuilding new image..");
 			}
 			
-			counter = 0;
-			BufferedImage toSave = new BufferedImage(xChunk * blocks, yChunk * blocks, BufferedImage.TYPE_INT_ARGB);
+			progressBarCounter = 0;
+			BufferedImage toSave = new BufferedImage(tileWidth * blocks, tileHeight * blocks, BufferedImage.TYPE_INT_ARGB);
 
 			Graphics2D g = img.createGraphics();
 			g.setBackground(Color.white);
@@ -149,39 +158,62 @@ public class Entry {
 			RenderingHints rh = g.getRenderingHints();	 
 			rh.put(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 			g.setRenderingHints (rh);
-			Stroke s = new BasicStroke(5);
+			Stroke s = new BasicStroke(border);
 			g.setStroke(s);
+			
 			for (int i = 0; i < blocks; i++) {
 				for (int j = 0; j < blocks; j++) {
-					int padding = 5;
-					if (tint < 255) {
-						File file = new File(newImg[i][j].getPath());
+					
+					Rectangle rectangleWithoutPadding = new Rectangle((i * tileWidth) + padding, (j * tileHeight) + padding, tileWidth - padding * 2, tileHeight - padding * 2);
+					Rectangle fullRectangle = new Rectangle(i * tileWidth, j * tileHeight, tileWidth, tileHeight);
+					
+					MosaicTile currentTile = newImg[i][j];
+					
+					if (tint_amount < 255) {
+						
+						// If the tint amount is not 255, then we should still draw
+						// the image.
+						
+						File file = new File(currentTile.getPath());
 						BufferedImage currentMosaicTileImage = ImageIO.read(file);
-						Ellipse2D ellipse = new Ellipse2D.Float();
-						ellipse.setFrame((i * xChunk) + padding, (j * yChunk) + padding, xChunk - padding *2, yChunk - padding *2);
-						g.setClip(ellipse);
-						g.drawImage(currentMosaicTileImage, i * xChunk, j * yChunk, xChunk, yChunk, null);	
+						
+						if (circle) {
+							Ellipse2D ellipse = new Ellipse2D.Float();
+							ellipse.setFrame(rectangleWithoutPadding);
+							g.setClip(ellipse);
+						}
+						
+						g.drawImage(currentMosaicTileImage, rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height, null);
+						
 					}
 					
-					if (tint > 0) {
-						Color c = newImg[i][j].getAverageColors();
-						Color newColor = new Color(c.getRed(), c.getGreen(), c.getBlue(), tint);
+					if (tint_amount > 0) {
+						
+						// Render the tint
+						
+						Color c = currentTile.getAverageColors();
+						Color newColor = new Color(c.getRed(), c.getGreen(), c.getBlue(), tint_amount);
 						g.setColor(newColor);
-						g.fillRect(i * xChunk, j * yChunk, xChunk, yChunk);
+						g.fillRect(fullRectangle.x, fullRectangle.y, fullRectangle.width, fullRectangle.height);
+						
+					}
+
+					g.setColor(currentTile.getAverageColors());
+					
+					if (circle) {
+						Rectangle2D rect = new Rectangle2D.Float();
+						rect.setRect(fullRectangle.x, fullRectangle.y, fullRectangle.width, fullRectangle.height);
+						g.setClip(rect);
+						g.drawOval(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height);
+					}
+					else {
+						g.drawRect(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height);	
 					}
 					
-					Rectangle2D rect = new Rectangle2D.Float();
-					rect.setRect(i * xChunk, j * yChunk, xChunk, yChunk);
-					g.setClip(rect);
-					
-					Color c = newImg[i][j].getAverageColors();
-					Color newColor = new Color(c.getRed(), c.getGreen(), c.getBlue(), 255);
-					g.setColor(newColor);
-					g.drawOval((i * xChunk) + padding, (j * yChunk) + padding, xChunk - padding *2, yChunk - padding *2);
-					counter++;
+					progressBarCounter++;
 					
 					if (verbose) {
-						printProgBar((counter * 100) / (blocks * blocks));	
+						printProgBar((progressBarCounter * 100) / (blocks * blocks));	
 					}
 				}
 			}
@@ -189,6 +221,7 @@ public class Entry {
 			if (verbose) {
 				System.out.println("\nSaving new image to disk: " + out);
 			}
+			
 			g.dispose();
 			ImageIO.write(img, "JPEG", new File(out));
 
@@ -256,7 +289,7 @@ public class Entry {
 					MosaicTile m = new MosaicTile(Integer.toString(i), f);
 					tiles.add(m);
 					sb.append(m.toCSV());
-//					sb.append('\n');
+					sb.append('\n');
 				} catch (Exception e) {
 					if (verbose) {
 						System.out.println(e);
