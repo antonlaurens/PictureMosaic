@@ -34,43 +34,43 @@ public class Entry {
 
 	private static final String IMAGE_CACHE_CSV = "imageCache.csv";
 
-	@Option(name = "-dir", aliases = "-d", required = true, usage = "The directory in which the source images are located")
+	@Option(name = "-dir", aliases = "-d", required = true, usage = "The directory in which the source images are located. These images will be used to build the PictureMosaic from, the smaller these images are the better.")
 	private String directory;
 
-	@Option(name = "-input", aliases = "-i", required = true, usage = "Input filename")
+	@Option(name = "-input", aliases = "-i", required = true, usage = "Input filename.")
 	private String in;
 
-	@Option(name = "-output", aliases = "-o", required = true, usage = "Output filename")
+	@Option(name = "-output", aliases = "-o", required = true, usage = "Output filename.")
 	private String out;
 
-	@Option(name = "-noise", aliases = "-n", usage = "Adds a chance of noise to the mosaic: [0, 1.0]")
+	@Option(name = "-noise", aliases = "-n", usage = "Adds a chance of noise to the mosaic: [0, 1.0]. Defaults to zero.")
 	private double noise = 0;
 
-	@Option(name = "-blocks", aliases = "-b", required = true, usage = "Amount of mosaic tiles per column and row.")
+	@Option(name = "-blocks", aliases = "-b", required = true, usage = "The number of tiles per row/ column of the PictureMosaic. Defaults to 50.")
 	private int blocks = 50;
 
-	@Option(name = "-tint", aliases = "-t", usage = "Indicated the alpha of the color to tint the blocks with: [0, 255]")
+	@Option(name = "-tint", aliases = "-t", usage = "Indicates the alpha of the color to tint the blocks with: [0, 255]. Defaults to 0.")
 	private int tint_amount = 0;
 
-	@Option(name = "-cache_rebuild", aliases = "-cr", usage = "Force a rebuild of the image cache")
+	@Option(name = "-cache_rebuild", aliases = "-cr", usage = "When the source images directory is read for the first time, a cache file is created to speed up consequent read. To force a rebuild of the image cache, specify this argument.")
 	private boolean clean;
 
-	@Option(name = "-padding", aliases = "-p", usage = "Padding between the tiles in pixels")
+	@Option(name = "-padding", aliases = "-p", usage = "The amount of padding in pixels between tiles.")
 	private int padding = 0;
 
-	@Option(name = "-stroke", aliases = "-s", usage = "Tile stroke width in pixels")
+	@Option(name = "-stroke", aliases = "-s", usage = "The stroke width on a tile. The colour of the stroke is the average RGB values inside the image.")
 	private int border = 0;
 
 	@Option(name = "-circle", aliases = "-cir", usage = "If this is set, then tiles will be drawn as circles, not rectangles.")
 	private boolean circle = false;
 
-	@Option(name = "-consume", aliases = "-c", usage = "If set, then an image can only be used once as a tile in the mosaic. Risk of running out of photos.")
+	@Option(name = "-consume", aliases = "-c", usage = "If set, then a source image can only be used once as a tile in the PictureMosaic. Please note that you run the risk of running out of photos.")
 	private boolean consume;
 
-	@Option(name = "-adjacency_ban", aliases = "-ab", usage = "If set, no two adjacent images can be the same")
+	@Option(name = "-adjacency_ban", aliases = "-ab", usage = "If set, no two adjacent images can be the same.")
 	private boolean adjacencyBan;
 
-	@Option(name = "-verbose", aliases = "-v", usage = "Enables verbose output")
+	@Option(name = "-verbose", aliases = "-v", usage = "Enables verbose output.")
 	private boolean verbose;
 
 	@SuppressWarnings("deprecation")
