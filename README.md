@@ -2,6 +2,14 @@
 
 The project aims at rendering picture mosaics (ie. pictures built out of other pictures), e.g
 
+### Example Input
+
+![alt input](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/input.jpg)
+
+### Example Output
+
+![alt output](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/output.jpg)
+
 
 ## Building
 
