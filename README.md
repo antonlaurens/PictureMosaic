@@ -4,11 +4,11 @@ The project aims at rendering picture mosaics (ie. pictures built out of other p
 
 ### Example Input
 
-![alt input](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/input.jpg =100x100)
+![alt input](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/input.jpg)
 
 ### Example Output
 
-![alt output](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/output.jpg =100x100)
+![alt output](https://github.com/antonlaurens/PictureMosaic/blob/master/examples/output.jpg)
 
 
 ## Building
