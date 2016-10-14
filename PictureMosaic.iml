@@ -10,9 +10,9 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="Maven: junit:junit:3.8.1" level="project" />
-    <orderEntry type="library" name="Maven: org.kohsuke.args4j:args4j-maven-plugin:2.0.29" level="project" />
-    <orderEntry type="library" name="Maven: args4j:args4j-tools:all:2.0.29" level="project" />
-    <orderEntry type="library" name="Maven: args4j:args4j:2.0.29" level="project" />
+    <orderEntry type="library" name="Maven: org.kohsuke.args4j:args4j-maven-plugin:2.32" level="project" />
+    <orderEntry type="library" name="Maven: args4j:args4j-tools:all:2.32" level="project" />
+    <orderEntry type="library" name="Maven: args4j:args4j:2.32" level="project" />
     <orderEntry type="library" name="Maven: org.apache.maven:maven-project:2.0.4" level="project" />
     <orderEntry type="library" name="Maven: org.apache.maven:maven-settings:2.0.4" level="project" />
     <orderEntry type="library" name="Maven: org.apache.maven:maven-profile:2.0.4" level="project" />
