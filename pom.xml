@@ -15,11 +15,11 @@
       <version>3.8.1</version>
     </dependency>
 
-    <dependency>
-      <groupId>org.kohsuke.args4j</groupId>
-      <artifactId>args4j-maven-plugin</artifactId>
-      <version>2.0.29</version>
-    </dependency>
+		<dependency>
+			<groupId>org.kohsuke.args4j</groupId>
+			<artifactId>args4j-maven-plugin</artifactId>
+			<version>2.32</version>
+		</dependency>
 
   </dependencies>
 
@@ -51,23 +51,24 @@
         </configuration>
       </plugin>
 
-      <!-- Make this jar executable -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <configuration>
-          <excludes>
-            <!-- <exclude>**/log4j.properties</exclude> -->
-          </excludes>
-          <archive>
-            <manifest>
-              <addClasspath>true</addClasspath>
-              <mainClass>com.gream.Entry</mainClass>
-              <classpathPrefix>dependency-jars/</classpathPrefix>
-            </manifest>
-          </archive>
-        </configuration>
-      </plugin>
+			<!-- Make this jar executable -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>2.6</version>
+				<configuration>
+					<excludes>
+						<!-- <exclude>**/log4j.properties</exclude> -->
+					</excludes>
+					<archive>
+						<manifest>
+							<addClasspath>true</addClasspath>
+							<mainClass>com.gream.Entry</mainClass>
+							<classpathPrefix>dependency-jars/</classpathPrefix>
+						</manifest>
+					</archive>
+				</configuration>
+			</plugin>
 
       <!-- Copy project dependency -->
       <plugin>
