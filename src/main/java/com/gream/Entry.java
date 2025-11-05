@@ -95,6 +95,13 @@ public class Entry {
       return;
     }
 
+    System.out.println("[DEBUG] Command line arguments parsed successfully");
+    System.out.println("[DEBUG] Directory: " + directory);
+    System.out.println("[DEBUG] Input file: " + in);
+    System.out.println("[DEBUG] Output file: " + out);
+    System.out.println("[DEBUG] Blocks: " + blocks);
+    System.out.println("[DEBUG] Clean cache: " + clean);
+
     File imageCache = new File(directory + "/" + IMAGE_CACHE_CSV);
     if (!imageCache.exists() || clean) {
       buildImageCache();
@@ -105,15 +112,48 @@ public class Entry {
       MosaicBinaryTree tree = tb.build();
 
       File f = new File(in);
+      System.out.println("[DEBUG] Reading input image file: " + f.getAbsolutePath());
+      System.out.println("[DEBUG] Input file exists: " + f.exists());
+      System.out.println("[DEBUG] Input file is file: " + f.isFile());
+      System.out.println("[DEBUG] Input file can read: " + f.canRead());
+
+      if (!f.exists()) {
+        System.err.println("[ERROR] Input file does not exist: " + f.getAbsolutePath());
+        System.err.println(
+            "[ERROR] Please check that the file path is correct and includes the file extension (e.g., .png, .jpg)");
+        System.exit(-1);
+      }
+
+      if (!f.isFile()) {
+        System.err.println("[ERROR] Input path is not a file: " + f.getAbsolutePath());
+        System.exit(-1);
+      }
+
+      if (!f.canRead()) {
+        System.err.println("[ERROR] Cannot read input file (permission denied): " + f.getAbsolutePath());
+        System.exit(-1);
+      }
+
       BufferedImage img = ImageIO.read(f);
+
+      if (img == null) {
+        System.err.println("[ERROR] Failed to read image file. The file may not be a valid image format.");
+        System.err.println("[ERROR] Supported formats: JPG, PNG, BMP");
+        System.err.println("[ERROR] File: " + f.getAbsolutePath());
+        System.exit(-1);
+      }
+
+      System.out
+          .println("[DEBUG] Successfully loaded input image: " + img.getWidth() + "x" + img.getHeight() + " pixels");
 
       int tileWidth = img.getWidth() / blocks;
       int tileHeight = img.getHeight() / blocks;
+      System.out.println("[DEBUG] Tile dimensions: " + tileWidth + "x" + tileHeight + " pixels per tile");
+      System.out.println("[DEBUG] Total tiles: " + blocks + "x" + blocks + " = " + (blocks * blocks) + " tiles");
+
       MosaicTile[][] newImg = new MosaicTile[blocks][blocks];
 
-      if (verbose) {
-        System.out.println("\nFinding best matches..");
-      }
+      System.out.println("\n[INFO] Finding best matches for " + (blocks * blocks) + " tiles...");
 
       int progressBarCounter = 0;
       for (int i = 0; i < tileWidth * blocks; i += tileWidth) {
@@ -139,15 +179,19 @@ public class Entry {
           newImg[i / tileWidth][j / tileHeight] = consumeClosest.getContents();
 
           progressBarCounter++;
+          int percent = (progressBarCounter * 100) / (blocks * blocks);
           if (verbose) {
-            printProgBar((progressBarCounter * 100) / (blocks * blocks));
+            printProgBar(percent);
+          } else if (progressBarCounter % 10 == 0 || progressBarCounter == blocks * blocks) {
+            // Show progress every 10 tiles or at completion
+            System.out.print("\r[INFO] Finding matches: " + progressBarCounter + "/" + (blocks * blocks) + " tiles ("
+                + percent + "%)");
           }
         }
       }
+      System.out.println(); // New line after progress
 
-      if (verbose) {
-        System.out.println("\nBuilding new image..");
-      }
+      System.out.println("\n[INFO] Building mosaic image...");
 
       progressBarCounter = 0;
       BufferedImage toSave = new BufferedImage(tileWidth * blocks, tileHeight * blocks, BufferedImage.TYPE_INT_ARGB);
@@ -164,7 +208,8 @@ public class Entry {
       for (int i = 0; i < blocks; i++) {
         for (int j = 0; j < blocks; j++) {
 
-          Rectangle rectangleWithoutPadding = new Rectangle((i * tileWidth) + padding, (j * tileHeight) + padding, tileWidth - padding * 2, tileHeight - padding * 2);
+          Rectangle rectangleWithoutPadding = new Rectangle((i * tileWidth) + padding, (j * tileHeight) + padding,
+              tileWidth - padding * 2, tileHeight - padding * 2);
           Rectangle fullRectangle = new Rectangle(i * tileWidth, j * tileHeight, tileWidth, tileHeight);
 
           MosaicTile currentTile = newImg[i][j];
@@ -183,7 +228,8 @@ public class Entry {
               g.setClip(ellipse);
             }
 
-            g.drawImage(currentMosaicTileImage, rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height, null);
+            g.drawImage(currentMosaicTileImage, rectangleWithoutPadding.x, rectangleWithoutPadding.y,
+                rectangleWithoutPadding.width, rectangleWithoutPadding.height, null);
 
           }
 
@@ -204,25 +250,92 @@ public class Entry {
             Rectangle2D rect = new Rectangle2D.Float();
             rect.setRect(fullRectangle.x, fullRectangle.y, fullRectangle.width, fullRectangle.height);
             g.setClip(rect);
-            g.drawOval(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height);
+            g.drawOval(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width,
+                rectangleWithoutPadding.height);
           } else {
-            g.drawRect(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width, rectangleWithoutPadding.height);
+            g.drawRect(rectangleWithoutPadding.x, rectangleWithoutPadding.y, rectangleWithoutPadding.width,
+                rectangleWithoutPadding.height);
           }
 
           progressBarCounter++;
-
+          int percent = (progressBarCounter * 100) / (blocks * blocks);
           if (verbose) {
-            printProgBar((progressBarCounter * 100) / (blocks * blocks));
+            printProgBar(percent);
+          } else if (progressBarCounter % 10 == 0 || progressBarCounter == blocks * blocks) {
+            // Show progress every 10 tiles or at completion
+            System.out.print("\r[INFO] Building mosaic: " + progressBarCounter + "/" + (blocks * blocks) + " tiles ("
+                + percent + "%)");
           }
         }
       }
+      System.out.println(); // New line after progress
 
-      if (verbose) {
-        System.out.println("\nSaving new image to disk: " + out);
-      }
+      File outputFile = new File(out);
+      System.out.println("\n[INFO] Saving output image to: " + outputFile.getAbsolutePath());
+      System.out.println(
+          "[DEBUG] Output image dimensions: " + (tileWidth * blocks) + "x" + (tileHeight * blocks) + " pixels");
 
       g.dispose();
-      ImageIO.write(img, "JPEG", new File(out));
+
+      // Determine format from file extension
+      String fileName = outputFile.getName().toLowerCase();
+      String format = "png"; // default
+      if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+        format = "jpeg";
+      } else if (fileName.endsWith(".png")) {
+        format = "png";
+      } else if (fileName.endsWith(".bmp")) {
+        format = "bmp";
+      }
+
+      System.out.println("[DEBUG] Detected output format: " + format.toUpperCase());
+
+      // Check if writer is available
+      javax.imageio.ImageWriter writer = null;
+      java.util.Iterator<javax.imageio.ImageWriter> writers = javax.imageio.ImageIO.getImageWritersByFormatName(format);
+      if (writers.hasNext()) {
+        writer = writers.next();
+      }
+
+      if (writer == null) {
+        System.err.println("[ERROR] No " + format.toUpperCase() + " writer available.");
+        System.err.println(
+            "[ERROR] Available writers: " + java.util.Arrays.toString(javax.imageio.ImageIO.getWriterFormatNames()));
+        System.exit(-1);
+      }
+
+      System.out.println("[DEBUG] Using ImageWriter: " + writer.getClass().getName());
+
+      // Convert image if needed for format compatibility (JPEG doesn't support alpha)
+      BufferedImage imageToSave = img;
+      if (format.equals("jpeg") && img.getType() != BufferedImage.TYPE_INT_RGB) {
+        System.out
+            .println("[DEBUG] Converting image from type " + img.getType() + " to TYPE_INT_RGB for JPEG compatibility");
+        imageToSave = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2 = imageToSave.createGraphics();
+        g2.drawImage(img, 0, 0, null);
+        g2.dispose();
+      }
+
+      boolean saved = ImageIO.write(imageToSave, format, outputFile);
+      if (!saved) {
+        System.err.println("[ERROR] Failed to save image. ImageIO.write returned false.");
+        System.err.println("[ERROR] Attempted format: " + format);
+        System.err.println("[ERROR] Image type: " + img.getType());
+        System.err.println("[ERROR] Available writers for " + format + ": " +
+            java.util.Arrays.toString(javax.imageio.ImageIO.getWriterFormatNames()));
+        System.exit(-1);
+      }
+
+      if (outputFile.exists()) {
+        long fileSize = outputFile.length();
+        System.out.println("[INFO] Successfully saved output image!");
+        System.out.println("[INFO] File size: " + (fileSize / 1024) + " KB (" + fileSize + " bytes)");
+        System.out.println("[INFO] Output file: " + outputFile.getAbsolutePath());
+      } else {
+        System.err.println("[ERROR] Output file was not created: " + outputFile.getAbsolutePath());
+        System.exit(-1);
+      }
 
     } catch (Exception e) {
       e.printStackTrace();
@@ -235,7 +348,7 @@ public class Entry {
 
     int len = imgGrid.length - 1;
     // a b c
-    // d   f
+    // d f
     // g h i
 
     if (row != 0 && col != 0) {
@@ -257,19 +370,14 @@ public class Entry {
     return hitList;
   }
 
-  static final String[] EXTENSIONS = new String[]{
-    "jpg", "png", "bmp"
+  static final String[] EXTENSIONS = new String[] {
+      "jpg", "png", "bmp"
   };
 
   static final FilenameFilter IMAGE_FILTER = new FilenameFilter() {
 
     public boolean accept(final File dir, final String name) {
-      for (final String ext : EXTENSIONS) {
-        if (name.endsWith("." + ext)) {
-          return (true);
-        }
-      }
-      return (false);
+      return (true);
     }
   };
 
@@ -278,18 +386,52 @@ public class Entry {
       System.out.println("Analysing images in directory..");
     }
 
+    System.out.println("[DEBUG] Building image cache for directory: " + directory);
+
+    File dirFile = new File(directory);
+    System.out.println("[DEBUG] Directory path: " + dirFile.getAbsolutePath());
+    System.out.println("[DEBUG] Directory exists: " + dirFile.exists());
+    System.out.println("[DEBUG] Is directory: " + dirFile.isDirectory());
+    System.out.println("[DEBUG] Can read: " + dirFile.canRead());
+
     List<MosaicTile> tiles = new ArrayList<MosaicTile>();
     StringBuffer sb = new StringBuffer();
-    File[] listFiles = new File(directory).listFiles(IMAGE_FILTER);
+    File[] listFiles = dirFile.listFiles(IMAGE_FILTER);
+
+    if (listFiles == null) {
+      System.err.println("[ERROR] Failed to list files in directory: " + directory);
+      System.err.println("[ERROR] Directory exists: " + dirFile.exists() + ", Is directory: " + dirFile.isDirectory()
+          + ", Can read: " + dirFile.canRead());
+      if (dirFile.exists() && dirFile.isDirectory() && !dirFile.canRead()) {
+        System.err.println("[ERROR] Permission denied: The directory exists but you don't have read permissions.");
+        System.err.println("[ERROR] On macOS, this may be due to privacy/security restrictions.");
+        System.err.println("[ERROR] Solutions:");
+        System.err.println(
+            "[ERROR]   1. Grant 'Full Disk Access' or 'Files and Folders' permission to Terminal/Java in System Preferences > Security & Privacy");
+        System.err.println(
+            "[ERROR]   2. Move the directory to a location you have full access to (e.g., ~/Desktop or ~/Documents)");
+        System.err.println("[ERROR]   3. Check directory permissions: chmod +r \"" + directory + "\"");
+      } else {
+        System.err.println("[ERROR] Directory may not exist, may not be accessible, or may not be a directory.");
+      }
+      System.exit(-1);
+    }
+
+    System.out.println("[DEBUG] Found " + listFiles.length + " files in directory");
+
     for (int i = 0; i < listFiles.length; i++) {
       File f = listFiles[i];
+      System.out.println("[DEBUG] Processing file " + (i + 1) + "/" + listFiles.length + ": " + f.getName()
+          + " (isFile: " + f.isFile() + ")");
       if (f.isFile()) {
         try {
           MosaicTile m = new MosaicTile(Integer.toString(i), f);
           tiles.add(m);
           sb.append(m.toCSV());
           sb.append('\n');
+          System.out.println("[DEBUG] Successfully processed image: " + f.getName());
         } catch (Exception e) {
+          System.err.println("[WARNING] Failed to process file " + f.getName() + ": " + e.getMessage());
           if (verbose) {
             System.out.println(e);
           }
@@ -301,8 +443,11 @@ public class Entry {
     }
     try {
       String imageCacheFile = directory + "/" + IMAGE_CACHE_CSV;
+      System.out.println("[DEBUG] Saving image cache to: " + imageCacheFile);
       FileUtils.saveFile(imageCacheFile, sb.toString());
+      System.out.println("[DEBUG] Successfully saved image cache with " + tiles.size() + " tiles");
     } catch (IOException e) {
+      System.err.println("[ERROR] Error saving image cache file: " + e.getMessage());
       if (verbose) {
         System.out.println("Error saving image cache file:");
         System.out.println(e);
