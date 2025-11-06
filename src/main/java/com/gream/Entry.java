@@ -51,7 +51,7 @@ public class Entry {
   @Option(name = "-blocks", aliases = "-b", required = true, usage = "The number of tiles per row/ column of the PictureMosaic. Defaults to 50.")
   private int blocks = 50;
 
-  @Option(name = "-tint", aliases = "-t", usage = "Indicates the alpha of the color to tint the blocks with: [0, 255]. Defaults to 0.")
+  @Option(name = "-tint", aliases = "-t", usage = "Indicates the alpha of the color to tint the blocks with: [0, 255]. The colour of the tint is the average RGB values of the section of the original image being replaced. Defaults to 0.")
   private int tint_amount = 0;
 
   @Option(name = "-cache_rebuild", aliases = "-cr", usage = "When the source images directory is read for the first time, a cache file is created to speed up consequent read. To force a rebuild of the image cache, specify this argument.")
@@ -60,7 +60,7 @@ public class Entry {
   @Option(name = "-padding", aliases = "-p", usage = "The amount of padding in pixels between tiles.")
   private int padding = 0;
 
-  @Option(name = "-stroke", aliases = "-s", usage = "The stroke width on a tile. The colour of the stroke is the average RGB values inside the image.")
+  @Option(name = "-stroke", aliases = "-s", usage = "The stroke width on a tile. The colour of the stroke is the average RGB values of the section of the original image being replaced.")
   private int border = 0;
 
   @Option(name = "-circle", aliases = "-cir", usage = "If this is set, then tiles will be drawn as circles, not rectangles.")
@@ -71,6 +71,12 @@ public class Entry {
 
   @Option(name = "-adjacency_ban", aliases = "-ab", usage = "If set, no two adjacent images can be the same.")
   private boolean adjacencyBan;
+
+  @Option(name = "-diversity_radius", aliases = "-dr", usage = "Radius in tiles to check for duplicate images. Larger values prevent repetition over larger areas. Defaults to 1 (only immediate neighbors).")
+  private int diversityRadius = 1;
+
+  @Option(name = "-max_usage", aliases = "-mu", usage = "Maximum number of times a source image can be used. 0 = unlimited. Helps prevent overuse of popular images.")
+  private int maxUsage = 0;
 
   @Option(name = "-verbose", aliases = "-v", usage = "Enables verbose output.")
   private boolean verbose;
@@ -160,31 +166,49 @@ public class Entry {
       System.out.println("[INFO] Loaded " + imageCache.size() + " images into memory cache");
 
       MosaicTile[][] newImg = new MosaicTile[blocks][blocks];
+      // Store the average color of each original image section for stroke coloring
+      Color[][] originalSectionColors = new Color[blocks][blocks];
+
+      // Track usage frequency of each image
+      Map<String, Integer> imageUsageCount = new HashMap<String, Integer>();
 
       System.out.println("\n[INFO] Finding best matches for " + (blocks * blocks) + " tiles...");
+      if (diversityRadius > 1 || maxUsage > 0) {
+        System.out.println("[INFO] Diversity settings: radius=" + diversityRadius + ", maxUsage="
+            + (maxUsage > 0 ? maxUsage : "unlimited"));
+      }
 
       int progressBarCounter = 0;
       for (int i = 0; i < tileWidth * blocks; i += tileWidth) {
 
         for (int j = 0; j < tileHeight * blocks; j += tileHeight) {
-          if (adjacencyBan) {
+          // Only unstale for diversity radius checks, not for max usage (max usage needs
+          // persistent stale state)
+          if (adjacencyBan || diversityRadius > 1) {
             tree.unstale();
           }
           int[] rgbs = new int[tileWidth * tileHeight];
           img.getRGB(i, j, tileWidth, tileHeight, rgbs, 0, tileWidth);
 
-          MosaicNode consumeClosest = tree.findClosest(new MosaicTile("", "", ImageUtils.getAverageRGB(rgbs)));
+          Color originalSectionColor = ImageUtils.getAverageRGB(rgbs);
+          MosaicTile targetTile = new MosaicTile("", "", originalSectionColor);
+          MosaicNode consumeClosest = findBestMatchWithDiversity(tree, targetTile, newImg,
+              i / tileWidth, j / tileHeight, imageUsageCount);
 
-          if (adjacencyBan) {
-            List<String> hitlist = getHitList(newImg, i / tileWidth, j / tileHeight);
-            while (hitlist.contains(consumeClosest.getContents().getId())) {
-              consumeClosest.setStale(true);
-              consumeClosest = tree.findClosest(new MosaicTile("", "", ImageUtils.getAverageRGB(rgbs)));
-            }
+          // Update usage count
+          String imageId = consumeClosest.getContents().getId();
+          int newUsageCount = imageUsageCount.getOrDefault(imageId, 0) + 1;
+          imageUsageCount.put(imageId, newUsageCount);
+
+          // Debug output for max usage (only in verbose mode)
+          if (verbose && maxUsage > 0 && newUsageCount >= maxUsage) {
+            System.out.println("[DEBUG] Image " + imageId + " has reached max usage limit (" + maxUsage + ")");
           }
 
           consumeClosest.setStale(consume);
           newImg[i / tileWidth][j / tileHeight] = consumeClosest.getContents();
+          // Store the original image section color for stroke coloring
+          originalSectionColors[i / tileWidth][j / tileHeight] = originalSectionColor;
 
           progressBarCounter++;
           int percent = (progressBarCounter * 100) / (blocks * blocks);
@@ -233,17 +257,16 @@ public class Entry {
               // Fallback to disk read if not in cache (shouldn't happen)
               System.err.println("[WARNING] Image not found in cache: " + currentTile.getPath());
               File file = new File(currentTile.getPath());
-              currentMosaicTileImage = ImageIO.read(file);
-              // Scale to tile size if needed
-              if (currentMosaicTileImage.getWidth() != tileWidth - padding * 2 ||
-                  currentMosaicTileImage.getHeight() != tileHeight - padding * 2) {
-                BufferedImage scaled = new BufferedImage(tileWidth - padding * 2, tileHeight - padding * 2,
-                    BufferedImage.TYPE_INT_ARGB);
-                Graphics2D g2 = scaled.createGraphics();
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g2.drawImage(currentMosaicTileImage, 0, 0, tileWidth - padding * 2, tileHeight - padding * 2, null);
-                g2.dispose();
-                currentMosaicTileImage = scaled;
+              BufferedImage original = ImageIO.read(file);
+              if (original != null) {
+                // Scale to tile size preserving aspect ratio
+                int targetWidth = Math.max(1, tileWidth - padding * 2);
+                int targetHeight = Math.max(1, tileHeight - padding * 2);
+                if (original.getWidth() != targetWidth || original.getHeight() != targetHeight) {
+                  currentMosaicTileImage = scaleImagePreservingAspectRatio(original, targetWidth, targetHeight);
+                } else {
+                  currentMosaicTileImage = original;
+                }
               }
             }
 
@@ -260,16 +283,17 @@ public class Entry {
 
           if (tint_amount > 0) {
 
-            // Render the tint
+            // Render the tint using the average color of the original image section
 
-            Color c = currentTile.getAverageColors();
+            Color c = originalSectionColors[i][j];
             Color newColor = new Color(c.getRed(), c.getGreen(), c.getBlue(), tint_amount);
             g.setColor(newColor);
             g.fillRect(fullRectangle.x, fullRectangle.y, fullRectangle.width, fullRectangle.height);
 
           }
 
-          g.setColor(currentTile.getAverageColors());
+          // Use the average color of the original image section, not the tile
+          g.setColor(originalSectionColors[i][j]);
 
           if (circle) {
             Rectangle2D rect = new Rectangle2D.Float();
@@ -369,31 +393,191 @@ public class Entry {
 
   }
 
+  /**
+   * Finds the best matching tile while respecting diversity constraints.
+   * This prevents repetitive patterns and overuse of popular images.
+   */
+  private MosaicNode findBestMatchWithDiversity(MosaicBinaryTree tree, MosaicTile targetTile,
+      MosaicTile[][] imgGrid, int row, int col, Map<String, Integer> imageUsageCount) {
+
+    MosaicNode bestMatch = null;
+    double bestScore = Double.MAX_VALUE;
+    int attempts = 0;
+    int maxAttempts = 100; // Prevent infinite loops
+
+    // Try to find a good match that respects diversity constraints
+    while (attempts < maxAttempts) {
+      MosaicNode candidate = tree.findClosest(targetTile);
+      if (candidate == null) {
+        break;
+      }
+
+      String imageId = candidate.getContents().getId();
+      double score = MosaicTile.getDistance(targetTile, candidate.getContents());
+
+      // Apply penalties for diversity violations
+      boolean violatesConstraints = false;
+
+      // Check if image is in the diversity radius (or use adjacency ban if enabled)
+      int checkRadius = adjacencyBan ? 1 : diversityRadius;
+      if (checkRadius > 0) {
+        List<String> nearbyImages = getImagesInRadius(imgGrid, row, col, checkRadius);
+        if (nearbyImages.contains(imageId)) {
+          // Penalty increases with distance (closer = bigger penalty)
+          double penalty = calculateDiversityPenalty(imgGrid, row, col, imageId, checkRadius);
+          score += penalty;
+          violatesConstraints = true;
+        }
+      }
+
+      // Check if image has exceeded max usage - reject it completely if so
+      if (maxUsage > 0) {
+        int usageCount = imageUsageCount.getOrDefault(imageId, 0);
+        if (usageCount >= maxUsage) {
+          // Image has exceeded max usage - mark as stale and skip it entirely
+          // Keep it stale permanently (don't unstale it) so it won't be selected again
+          candidate.setStale(true);
+          attempts++;
+          continue; // Skip this candidate and try the next one
+        } else {
+          // Small penalty for frequently used images (encourages diversity)
+          score += usageCount * 50.0;
+        }
+      }
+
+      // If this is the best match so far, remember it
+      if (score < bestScore) {
+        bestScore = score;
+        bestMatch = candidate;
+      }
+
+      // If we found a good match without violations, use it
+      if (!violatesConstraints) {
+        break;
+      }
+
+      // Mark this candidate as stale and try again
+      candidate.setStale(true);
+      attempts++;
+    }
+
+    // If we couldn't find a good match, use the best one we found
+    // But first check if it violates max usage (only if we have no other choice)
+    if (bestMatch == null) {
+      // Only unstale if max usage is not enabled (max usage needs persistent stale
+      // state)
+      if (maxUsage == 0) {
+        tree.unstale();
+      }
+      bestMatch = tree.findClosest(targetTile);
+      // Final check: if max usage is enabled and this match exceeds it, we have no
+      // choice
+      if (maxUsage > 0 && bestMatch != null) {
+        String bestImageId = bestMatch.getContents().getId();
+        int usageCount = imageUsageCount.getOrDefault(bestImageId, 0);
+        if (usageCount >= maxUsage) {
+          // All images have exceeded max usage - we'll use it anyway but warn
+          if (verbose) {
+            System.err.println(
+                "[WARNING] All available images have exceeded max usage. Using image " + bestImageId + " anyway.");
+          }
+        }
+      }
+    } else if (maxUsage > 0 && bestMatch != null) {
+      // Double-check that our best match doesn't exceed max usage
+      String bestImageId = bestMatch.getContents().getId();
+      int usageCount = imageUsageCount.getOrDefault(bestImageId, 0);
+      if (usageCount >= maxUsage) {
+        // If it does, try to find any non-exceeded image
+        // Don't unstale - keep exceeded images stale
+        MosaicNode fallback = null;
+        int fallbackAttempts = 0;
+        while (fallbackAttempts < 200 && fallback == null) {
+          MosaicNode candidate = tree.findClosest(targetTile);
+          if (candidate == null)
+            break;
+          String candidateId = candidate.getContents().getId();
+          int candidateUsage = imageUsageCount.getOrDefault(candidateId, 0);
+          if (candidateUsage < maxUsage) {
+            fallback = candidate;
+            break;
+          }
+          // Mark as stale so we don't try it again
+          candidate.setStale(true);
+          fallbackAttempts++;
+        }
+        if (fallback != null) {
+          bestMatch = fallback;
+        } else {
+          // All images have exceeded max usage - we'll use the best match anyway
+          if (verbose) {
+            System.err.println(
+                "[WARNING] All available images have exceeded max usage. Using image " + bestImageId + " anyway.");
+          }
+        }
+      }
+    }
+
+    return bestMatch;
+  }
+
+  /**
+   * Gets all image IDs within the specified radius of the given position.
+   */
+  private List<String> getImagesInRadius(MosaicTile[][] imgGrid, int row, int col, int radius) {
+    List<String> images = new ArrayList<String>();
+    int rows = imgGrid.length;
+    int cols = imgGrid[0].length;
+
+    for (int r = Math.max(0, row - radius); r <= Math.min(rows - 1, row + radius); r++) {
+      for (int c = Math.max(0, col - radius); c <= Math.min(cols - 1, col + radius); c++) {
+        // Skip the current position
+        if (r == row && c == col) {
+          continue;
+        }
+        // Only check positions that are within the radius (circular, not square)
+        double distance = Math.sqrt((r - row) * (r - row) + (c - col) * (c - col));
+        if (distance <= radius && imgGrid[r][c] != null) {
+          images.add(imgGrid[r][c].getId());
+        }
+      }
+    }
+
+    return images;
+  }
+
+  /**
+   * Calculates a penalty score based on how close duplicate images are.
+   * Closer duplicates get larger penalties.
+   */
+  private double calculateDiversityPenalty(MosaicTile[][] imgGrid, int row, int col, String imageId, int radius) {
+    double totalPenalty = 0.0;
+    int rows = imgGrid.length;
+    int cols = imgGrid[0].length;
+
+    for (int r = Math.max(0, row - radius); r <= Math.min(rows - 1, row + radius); r++) {
+      for (int c = Math.max(0, col - radius); c <= Math.min(cols - 1, col + radius); c++) {
+        if (imgGrid[r][c] != null && imgGrid[r][c].getId().equals(imageId)) {
+          double distance = Math.sqrt((r - row) * (r - row) + (c - col) * (c - col));
+          if (distance > 0) {
+            // Penalty is inversely proportional to distance (closer = bigger penalty)
+            totalPenalty += 1000.0 / (distance + 1.0);
+          }
+        }
+      }
+    }
+
+    return totalPenalty;
+  }
+
+  /**
+   * Legacy method for backward compatibility with old adjacency ban.
+   * 
+   * @deprecated Use getImagesInRadius instead
+   */
+  @Deprecated
   private List<String> getHitList(MosaicTile[][] imgGrid, int row, int col) {
-    List<String> hitList = new ArrayList<String>();
-
-    int len = imgGrid.length - 1;
-    // a b c
-    // d f
-    // g h i
-
-    if (row != 0 && col != 0) {
-      hitList.add(imgGrid[row - 1][col - 1].getId()); // a
-    }
-
-    if (row != 0) {
-      hitList.add(imgGrid[row - 1][col].getId()); // b
-    }
-
-    if (row != 0 && col != len) {
-      hitList.add(imgGrid[row - 1][col + 1].getId()); // c
-    }
-
-    if (col != 0) {
-      hitList.add(imgGrid[row][col - 1].getId()); // d
-    }
-
-    return hitList;
+    return getImagesInRadius(imgGrid, row, col, 1);
   }
 
   static final String[] EXTENSIONS = new String[] {
@@ -513,13 +697,7 @@ public class Entry {
                 if (original.getWidth() == targetWidth && original.getHeight() == targetHeight) {
                   scaled = original;
                 } else {
-                  scaled = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
-                  Graphics2D g2 = scaled.createGraphics();
-                  g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                  g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                  g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                  g2.drawImage(original, 0, 0, targetWidth, targetHeight, null);
-                  g2.dispose();
+                  scaled = scaleImagePreservingAspectRatio(original, targetWidth, targetHeight);
                 }
 
                 cache.put(imagePath, scaled);
@@ -565,6 +743,55 @@ public class Entry {
     }
 
     return cache;
+  }
+
+  /**
+   * Scales an image to fit within target dimensions while preserving aspect
+   * ratio.
+   * The image is scaled to fill the target area and then cropped/centered to fit
+   * exactly.
+   * This prevents stretching/distortion of source images.
+   * 
+   * @param original     The original image to scale
+   * @param targetWidth  Target width in pixels
+   * @param targetHeight Target height in pixels
+   * @return Scaled and cropped image with preserved aspect ratio
+   */
+  private BufferedImage scaleImagePreservingAspectRatio(BufferedImage original, int targetWidth, int targetHeight) {
+    int originalWidth = original.getWidth();
+    int originalHeight = original.getHeight();
+
+    // Calculate scaling factor to fill the target area (scale to cover, not fit)
+    double scaleX = (double) targetWidth / originalWidth;
+    double scaleY = (double) targetHeight / originalHeight;
+    double scale = Math.max(scaleX, scaleY); // Use larger scale to ensure we fill the area
+
+    // Calculate scaled dimensions
+    int scaledWidth = (int) Math.round(originalWidth * scale);
+    int scaledHeight = (int) Math.round(originalHeight * scale);
+
+    // Create scaled image
+    BufferedImage scaled = new BufferedImage(scaledWidth, scaledHeight, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g2 = scaled.createGraphics();
+    g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+    g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    g2.drawImage(original, 0, 0, scaledWidth, scaledHeight, null);
+    g2.dispose();
+
+    // Crop to exact target size (center crop)
+    int cropX = (scaledWidth - targetWidth) / 2;
+    int cropY = (scaledHeight - targetHeight) / 2;
+
+    BufferedImage cropped = scaled.getSubimage(cropX, cropY, targetWidth, targetHeight);
+
+    // Create final image with exact target dimensions
+    BufferedImage result = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g3 = result.createGraphics();
+    g3.drawImage(cropped, 0, 0, null);
+    g3.dispose();
+
+    return result;
   }
 
   public static void printProgBar(int percent) {

@@ -15,6 +15,8 @@ public class MosaicNode extends BinaryTreeNode<MosaicTile> {
   }
 
   public static MosaicTile merge(MosaicTile left, MosaicTile right) {
+    // Merge RGB colors (averaging in RGB space is sufficient for tree structure)
+    // The LAB color space is used for distance calculations, which is where it matters most
     int r = (left.getR() + right.getR()) / 2;
     int g = (left.getG() + right.getG()) / 2;
     int b = (left.getB() + right.getB()) / 2;
@@ -24,8 +26,8 @@ public class MosaicNode extends BinaryTreeNode<MosaicTile> {
   }
 
   public static BinaryTreeNode<MosaicTile> min(BinaryTreeNode<MosaicTile> n1, BinaryTreeNode<MosaicTile> n2, MosaicTile obj) {
-    float distance = MosaicTile.getDistance(n1.getContents(), obj);
-    float distance2 = MosaicTile.getDistance(n2.getContents(), obj);
+    double distance = MosaicTile.getDistance(n1.getContents(), obj);
+    double distance2 = MosaicTile.getDistance(n2.getContents(), obj);
     return distance < distance2 ? n1 : n2;
   }
 
