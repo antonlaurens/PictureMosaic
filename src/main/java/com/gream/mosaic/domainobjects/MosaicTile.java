@@ -63,11 +63,16 @@ public class MosaicTile {
     return this.averageColors.getBlue();
   }
 
+  /**
+   * Calculates the squared Euclidean distance between two tiles in RGB color space.
+   * Using squared distance avoids the expensive sqrt operation while maintaining
+   * the same relative ordering for comparison purposes.
+   */
   public static int getDistance(MosaicTile obj1, MosaicTile obj2) {
     int r = (obj1.getR() - obj2.getR()) * (obj1.getR() - obj2.getR());
     int g = (obj1.getG() - obj2.getG()) * (obj1.getG() - obj2.getG());
     int b = (obj1.getB() - obj2.getB()) * (obj1.getB() - obj2.getB());
-    return (int) Math.sqrt(r + g + b);
+    return r + g + b; // Return squared distance (no sqrt needed for comparison)
   }
 
   @Override

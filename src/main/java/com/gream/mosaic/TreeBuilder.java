@@ -24,18 +24,23 @@ public class TreeBuilder {
 
   public MosaicBinaryTree build() throws Exception {
 
-    BufferedReader br = new BufferedReader(new FileReader(this.imageCachePath));
-    String line;
-    while ((line = br.readLine()) != null) {
-      String[] l = line.split(",");
-      int r = Integer.parseInt(l[1]);
-      int g = Integer.parseInt(l[2]);
-      int b = Integer.parseInt(l[3]);
+    try (BufferedReader br = new BufferedReader(new FileReader(this.imageCachePath))) {
+      String line;
+      while ((line = br.readLine()) != null) {
+        if (line.trim().isEmpty()) {
+          continue; // Skip empty lines
+        }
+        String[] l = line.split(",");
+        if (l.length >= 5) {
+          int r = Integer.parseInt(l[1]);
+          int g = Integer.parseInt(l[2]);
+          int b = Integer.parseInt(l[3]);
 
-      Color averageColors = new Color(r, g, b);
-      objs.enqueue(new MosaicTile(l[0], l[4], averageColors));
+          Color averageColors = new Color(r, g, b);
+          objs.enqueue(new MosaicTile(l[0], l[4], averageColors));
+        }
+      }
     }
-    br.close();
 
     root = new MosaicNode(objs.dequeue(), objs.dequeue());
 

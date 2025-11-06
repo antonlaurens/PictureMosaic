@@ -15,7 +15,9 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.imageio.ImageIO;
 
@@ -102,8 +104,8 @@ public class Entry {
     System.out.println("[DEBUG] Blocks: " + blocks);
     System.out.println("[DEBUG] Clean cache: " + clean);
 
-    File imageCache = new File(directory + "/" + IMAGE_CACHE_CSV);
-    if (!imageCache.exists() || clean) {
+    File imageCacheFile = new File(directory + "/" + IMAGE_CACHE_CSV);
+    if (!imageCacheFile.exists() || clean) {
       buildImageCache();
     }
 
@@ -151,6 +153,12 @@ public class Entry {
       System.out.println("[DEBUG] Tile dimensions: " + tileWidth + "x" + tileHeight + " pixels per tile");
       System.out.println("[DEBUG] Total tiles: " + blocks + "x" + blocks + " = " + (blocks * blocks) + " tiles");
 
+      // Pre-load and pre-scale all source images to tile size for performance
+      System.out.println("\n[INFO] Pre-loading source images into memory cache...");
+      Map<String, BufferedImage> imageCache = loadImagesIntoMemoryCache(directory + "/" + IMAGE_CACHE_CSV, tileWidth,
+          tileHeight);
+      System.out.println("[INFO] Loaded " + imageCache.size() + " images into memory cache");
+
       MosaicTile[][] newImg = new MosaicTile[blocks][blocks];
 
       System.out.println("\n[INFO] Finding best matches for " + (blocks * blocks) + " tiles...");
@@ -196,7 +204,7 @@ public class Entry {
       progressBarCounter = 0;
       BufferedImage toSave = new BufferedImage(tileWidth * blocks, tileHeight * blocks, BufferedImage.TYPE_INT_ARGB);
 
-      Graphics2D g = img.createGraphics();
+      Graphics2D g = toSave.createGraphics();
       g.setBackground(Color.white);
       g.clearRect(0, 0, toSave.getWidth(), toSave.getHeight());
       RenderingHints rh = g.getRenderingHints();
@@ -219,8 +227,25 @@ public class Entry {
             // If the tint amount is not 255, then we should still draw
             // the image.
 
-            File file = new File(currentTile.getPath());
-            BufferedImage currentMosaicTileImage = ImageIO.read(file);
+            // Use cached image instead of reading from disk
+            BufferedImage currentMosaicTileImage = imageCache.get(currentTile.getPath());
+            if (currentMosaicTileImage == null) {
+              // Fallback to disk read if not in cache (shouldn't happen)
+              System.err.println("[WARNING] Image not found in cache: " + currentTile.getPath());
+              File file = new File(currentTile.getPath());
+              currentMosaicTileImage = ImageIO.read(file);
+              // Scale to tile size if needed
+              if (currentMosaicTileImage.getWidth() != tileWidth - padding * 2 ||
+                  currentMosaicTileImage.getHeight() != tileHeight - padding * 2) {
+                BufferedImage scaled = new BufferedImage(tileWidth - padding * 2, tileHeight - padding * 2,
+                    BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g2 = scaled.createGraphics();
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g2.drawImage(currentMosaicTileImage, 0, 0, tileWidth - padding * 2, tileHeight - padding * 2, null);
+                g2.dispose();
+                currentMosaicTileImage = scaled;
+              }
+            }
 
             if (circle) {
               Ellipse2D ellipse = new Ellipse2D.Float();
@@ -307,13 +332,14 @@ public class Entry {
       System.out.println("[DEBUG] Using ImageWriter: " + writer.getClass().getName());
 
       // Convert image if needed for format compatibility (JPEG doesn't support alpha)
-      BufferedImage imageToSave = img;
-      if (format.equals("jpeg") && img.getType() != BufferedImage.TYPE_INT_RGB) {
+      BufferedImage imageToSave = toSave;
+      if (format.equals("jpeg") && toSave.getType() != BufferedImage.TYPE_INT_RGB) {
         System.out
-            .println("[DEBUG] Converting image from type " + img.getType() + " to TYPE_INT_RGB for JPEG compatibility");
-        imageToSave = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+            .println(
+                "[DEBUG] Converting image from type " + toSave.getType() + " to TYPE_INT_RGB for JPEG compatibility");
+        imageToSave = new BufferedImage(toSave.getWidth(), toSave.getHeight(), BufferedImage.TYPE_INT_RGB);
         Graphics2D g2 = imageToSave.createGraphics();
-        g2.drawImage(img, 0, 0, null);
+        g2.drawImage(toSave, 0, 0, null);
         g2.dispose();
       }
 
@@ -321,7 +347,7 @@ public class Entry {
       if (!saved) {
         System.err.println("[ERROR] Failed to save image. ImageIO.write returned false.");
         System.err.println("[ERROR] Attempted format: " + format);
-        System.err.println("[ERROR] Image type: " + img.getType());
+        System.err.println("[ERROR] Image type: " + imageToSave.getType());
         System.err.println("[ERROR] Available writers for " + format + ": " +
             java.util.Arrays.toString(javax.imageio.ImageIO.getWriterFormatNames()));
         System.exit(-1);
@@ -454,6 +480,91 @@ public class Entry {
       }
       System.exit(-1);
     }
+  }
+
+  /**
+   * Loads source images into an in-memory cache, pre-scaled to tile size for
+   * performance.
+   * This avoids reading images from disk for each tile during rendering.
+   */
+  private Map<String, BufferedImage> loadImagesIntoMemoryCache(String imageCachePath, int tileWidth, int tileHeight) {
+    Map<String, BufferedImage> cache = new HashMap<String, BufferedImage>();
+
+    try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(imageCachePath))) {
+      String line;
+      int loaded = 0;
+      int failed = 0;
+
+      while ((line = br.readLine()) != null && !line.trim().isEmpty()) {
+        String[] parts = line.split(",");
+        if (parts.length >= 5) {
+          String imagePath = parts[4]; // Path is the 5th column (index 4)
+
+          try {
+            File imageFile = new File(imagePath);
+            if (imageFile.exists() && imageFile.isFile()) {
+              BufferedImage original = ImageIO.read(imageFile);
+              if (original != null) {
+                // Pre-scale image to tile size (accounting for padding)
+                int targetWidth = Math.max(1, tileWidth - padding * 2);
+                int targetHeight = Math.max(1, tileHeight - padding * 2);
+
+                BufferedImage scaled;
+                if (original.getWidth() == targetWidth && original.getHeight() == targetHeight) {
+                  scaled = original;
+                } else {
+                  scaled = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+                  Graphics2D g2 = scaled.createGraphics();
+                  g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                  g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                  g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                  g2.drawImage(original, 0, 0, targetWidth, targetHeight, null);
+                  g2.dispose();
+                }
+
+                cache.put(imagePath, scaled);
+                loaded++;
+
+                if (verbose && loaded % 100 == 0) {
+                  System.out.print("\r[INFO] Loaded " + loaded + " images...");
+                }
+              } else {
+                failed++;
+                if (verbose) {
+                  System.err.println("[WARNING] Failed to read image: " + imagePath);
+                }
+              }
+            } else {
+              failed++;
+              if (verbose) {
+                System.err.println("[WARNING] Image file not found: " + imagePath);
+              }
+            }
+          } catch (Exception e) {
+            failed++;
+            if (verbose) {
+              System.err.println("[WARNING] Error loading image " + imagePath + ": " + e.getMessage());
+            }
+          }
+        }
+      }
+
+      if (verbose) {
+        System.out.println(); // New line after progress
+      }
+
+      if (failed > 0) {
+        System.out.println("[WARNING] Failed to load " + failed + " images (they will be skipped)");
+      }
+
+    } catch (IOException e) {
+      System.err.println("[ERROR] Failed to read image cache file: " + e.getMessage());
+      if (verbose) {
+        e.printStackTrace();
+      }
+    }
+
+    return cache;
   }
 
   public static void printProgBar(int percent) {
